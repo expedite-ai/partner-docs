@@ -1,0 +1,26 @@
+---
+title: "Notify your system when an EIN is issued"
+---
+
+EIN issuance uses the same incorporation.updated webhook. There is no separate subscription or EIN number in the callback. A submitted SS-4 or uploaded, unverified notice does not mean an EIN has been issued: Expedite reports ISSUED only after the EIN is verified from the canonical evidence.
+
+1. Register and verify your HTTPS endpoint. Your server needs incorporations:read to fetch progress; use webhooks:manage to configure delivery through the API.
+2. Verify the callback signature and durably accept the event before returning 2xx. Queue processing, deduplicate by event ID, and use referralId to identify the referral you created.
+3. GET /incorporations/&#123;referralId&#125; with your Bearer token. Check progress.ein for ISSUED and progress.einIssuedAt for the verification timestamp. The response's version may already be newer than the event; process the current snapshot and never replace it with an older version.
+4. Record the issued milestone idempotently in your system. The status response does not contain the EIN number. Progress remains available when the founder declines or later withdraws optional document sharing.
+5. If you need the IRS notice, use a client with incorporation_documents:read. GET /incorporations/&#123;referralId&#125;/documents lists an EIN_NOTICE only when the founder currently grants sharing and verified evidence is available. POST /incorporations/&#123;referralId&#125;/documents/&#123;documentId&#125;/download returns a download link valid for 60 seconds. Recheck access when requesting a new link; a revoked grant stops future downloads.
+
+Relevant fields from the progress response:
+
+```json
+{
+	"id": "referral_id",
+	"version": 7,
+	"progress": {
+		"ein": "ISSUED",
+		"einIssuedAt": "2026-11-09T12:00:00.000Z"
+	}
+}
+```
+
+This is a response excerpt, not the full referral object. A notification is a prompt to fetch authorized state, not permission to read a document. If the EIN was issued before your endpoint became active, fetch the current referral to catch up. A later document-sharing grant is not a separate webhook event; query the document list when the founder completes that sharing step. Use delivery history and replay to recover exhausted deliveries, retaining event-ID deduplication across replay.

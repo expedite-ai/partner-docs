@@ -1,0 +1,23 @@
+---
+title: "Webhooks"
+---
+
+Register an HTTPS endpoint and store its one-time signing secret. Registration is inactive until POST /webhook-endpoints/&#123;endpointId&#125;/verify receives a 2xx response to a signed endpoint.verification event. Redirects are not followed, and non-public network destinations are rejected.
+
+Progress notifications use this body only:
+
+```json
+{
+	"id": "event_id",
+	"type": "incorporation.updated",
+	"referralId": "referral_id",
+	"version": 2,
+	"createdAt": "2026-11-08T12:00:00.000Z"
+}
+```
+
+Verify before parsing or acting. Read webhook-id, webhook-timestamp and webhook-signature. The timestamp is Unix seconds. Reject timestamps outside a five-minute tolerance, compute HMAC-SHA256 using the signing secret as its exact UTF-8 string over id + "." + timestamp + "." + the exact raw HTTP body, encode the digest in base64 and compare the result with the value after "v1," using a constant-time comparison. Check webhook-id against the signed body's id. Verification events use id, type endpoint.verification and createdAt, without a referral ID.
+
+Return 2xx promptly. Delivery is at least once and can be out of order. Deduplicate by event ID, compare resource versions, and fetch the current authorized referral. Each endpoint/event pair receives up to eight attempts per delivery cycle, with exponential backoff beginning at one minute. An explicit replay opens another bounded cycle for the same event ID and preserves attempt history. A timed-out or interrupted request may already have reached your server.
+
+Delivery history and its latest 100 attempt records expose HTTP status and safe error codes. No response body from your endpoint is retained. Current partner/referral authority is checked before delivery and replay. Document-only changes are not separate webhook events. Secret rotation replaces the signing key for later attempts; an already in-flight request may still carry its earlier signature. Disable an endpoint to stop future delivery, then verify it again to reactivate.

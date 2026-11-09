@@ -1,0 +1,24 @@
+---
+title: "Getting started"
+---
+
+Expedite enables your partner organization and configures its environment. An integration manager creates an API client in Partner Console → Integration. Keep development and production credentials separate; Expedite can provide sandbox access for simulation. A token's environment comes from its client; a request cannot choose another partner or environment.
+
+1. POST /token with grant_type=client_credentials, client_id and client_secret. JSON and application/x-www-form-urlencoded bodies are accepted. Save secrets on your server. Tokens last one hour; reuse them until expiry.
+2. POST /incorporations with a Bearer token and an Idempotency-Key header. The body contains externalReference, email, givenName, familyName and an optional companyName. lane, when supplied, must be US_DE_C_CORP. An optional partnerCode must match your registered partner.
+3. Save the returned referral ID. In production the operation queues an invitation; it does not sign documents, charge the founder, submit a filing or create a bank application. The founder signs in as the invited recipient and chooses or creates their organization.
+4. In sandbox, POST /sandbox/incorporations/&#123;referralId&#125;/simulate with a scenario: INVITED, CLAIMED, SUBMITTED, FILING, INCORPORATED or EIN_ISSUED. These scenarios send no founder email and create no real case, documents, payment, filing or bank account.
+5. GET /incorporations/&#123;referralId&#125; to read current status, or configure an endpoint to receive update notifications. Public documentation disables interactive requests; use your sandbox credentials from your own server or API client.
+
+Example create body:
+
+```json
+{
+	"externalReference": "partner-sandbox-formation-001",
+	"email": "founder@example.com",
+	"givenName": "Jane",
+	"familyName": "Doe",
+	"companyName": "Example Labs",
+	"lane": "US_DE_C_CORP"
+}
+```

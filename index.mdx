@@ -1,0 +1,46 @@
+---
+title: "Expedite Partner API"
+description: "Invite founders to incorporate, follow their progress, and receive the documents they choose to share."
+---
+
+Connect your platform to Expedite's Delaware C Corporation workflow. Your customer
+starts with you, completes their incorporation in Expedite, and returns to your
+platform when they are ready.
+
+<CardGroup cols={2}>
+	<Card title="Send your first invitation" icon="paper-plane" href="/guides/quickstart">
+		Authenticate, invite a founder, and track the referral from your system.
+	</Card>
+	<Card title="Know when an EIN is issued" icon="bell" href="/guides/ein-notifications">
+		Receive a signed update and retrieve the verified EIN milestone.
+	</Card>
+	<Card title="Follow each incorporation" icon="list-check" href="/guides/progress-and-documents">
+		Understand filing progress and optional document sharing.
+	</Card>
+	<Card title="Explore the Partner API" icon="code" href="/api-reference/obtain-a-partner-access-token">
+		Browse endpoints, request examples, response schemas, and webhook payloads.
+	</Card>
+</CardGroup>
+
+## From invitation to incorporation
+
+<Steps>
+	<Step title="Invite your customer">
+		Create a referral from your backend with a stable external reference. Expedite sends the founder an invitation
+		to get started.
+	</Step>
+	<Step title="The founder completes their application">
+		The founder signs in, completes the incorporation forms, and signs their documents. At submission, they can
+		optionally share eligible incorporation documents with your organization.
+	</Step>
+	<Step title="Stay up to date">
+		Follow formation and EIN progress from your dashboard or API. Signed webhooks tell your server when to fetch the
+		latest referral state.
+	</Step>
+</Steps>
+
+<Note>
+	Partner access is enabled by Expedite. Ask your Expedite contact for your API environment and credentials before
+	making requests. The reference shows the production API address; access depends on your partner's rollout. Run
+	examples from your own server or API client.
+</Note>

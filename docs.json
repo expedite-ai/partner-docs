@@ -1,0 +1,42 @@
+{
+	"$schema": "https://mintlify.com/docs.json",
+	"theme": "mint",
+	"name": "Expedite Partners",
+	"colors": { "primary": "#153d2d", "light": "#a5beb2", "dark": "#083323" },
+	"logo": { "light": "/brand/wordmark.png", "dark": "/brand/wordmark-dark.png" },
+	"favicon": "/brand/icon.png",
+	"appearance": { "default": "light" },
+	"navbar": { "primary": { "type": "button", "label": "Partner Console", "href": "https://app.expedite.now" } },
+	"api": {
+		"playground": { "display": "simple", "proxy": false },
+		"examples": { "languages": ["bash", "javascript", "python"] }
+	},
+	"navigation": {
+		"tabs": [
+			{
+				"tab": "Guides",
+				"groups": [
+					{ "group": "Get started", "pages": ["index", "guides/quickstart", "guides/authentication"] },
+					{
+						"group": "Incorporations",
+						"pages": ["guides/progress-and-documents", "guides/ein-notifications"]
+					},
+					{
+						"group": "Build your integration",
+						"pages": ["guides/webhooks", "guides/reliability", "guides/versioning"]
+					}
+				]
+			},
+			{ "tab": "API reference", "openapi": "openapi.json" },
+			{
+				"tab": "Events",
+				"groups": [
+					{
+						"group": "Webhook payloads",
+						"pages": ["events/incorporation-updated", "events/endpoint-verification"]
+					}
+				]
+			}
+		]
+	}
+}

@@ -1,0 +1,9 @@
+---
+title: "Progress and document sharing"
+---
+
+The partner initially sees its own invitation receipt. Coarse case tracking starts when the intended founder accepts the disclosed referral. Invitation, formation and EIN state are independent: sent is not delivered, submitted is not incorporated, and incorporated is not EIN issued. FILING means the canonical filing-order submission is recorded as delivered, with filingOrderedAt; it does not attest state acceptance. submittedAt records the founder’s submission. Each response carries the published invitation/progress version. Compare versions when processing notifications and fetch the current snapshot. Detail-only fields, including workflowSteps and currently shared documents, are evaluated on read and may change without advancing that version or sending a webhook; refresh the detail when your user opens the referral.
+
+At final submission, the founder can separately allow access to the reviewed formation certificate and verified IRS EIN notice. Documents appear only after that grant and the relevant evidence is ready. Internal notes, identity documents, SS-4 applications and unrelated company files are not part of this API. A shared official artifact can itself contain the company EIN or signatures.
+
+Withdrawing document sharing stops future document access while disclosed progress continues. Download links expire after 60 seconds; a previously issued link may work until expiry. Withdrawal cannot erase a copy already retained by a partner. Suspended partner access and canceled referrals also stop eligible reads and notifications. Referring-bank links are registered by Expedite and do not attest account approval.

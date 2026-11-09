@@ -1,0 +1,9 @@
+---
+title: "Idempotency, pagination and errors"
+---
+
+Create and invitation resend require Idempotency-Key. Retry an uncertain response with the same key and identical input. Keys are scoped to your partner, environment and operation. Reusing a key with changed input returns 409. externalReference also identifies one referral within the partner and environment; a conflicting create returns 409. A create retry does not send another invitation. To resend, call the explicit invitation operation with its own key. One founder can form multiple companies with distinct references.
+
+List responses contain items, nextCursor and totalCount. Send nextCursor as cursor for the next page. limit is at most 100. search matches only your authorized referrals. Webhook delivery history uses its returned next object as before[createdAt] and before[id] query parameters.
+
+Errors have an error object containing code, message and requestId, with issues for invalid fields when available. The X-Request-Id response header identifies the same request. Use 400 to correct inputs, 401 to refresh credentials or resolve disabled access, 403 for missing permission, 404 for missing or inaccessible records, and 409 for a conflict requiring review. A 429 includes Retry-After; wait at least that long. Retry transient 5xx responses with backoff and the original idempotency key. Never place secrets in URLs, logs or support messages.
