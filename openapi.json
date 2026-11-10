@@ -7,7 +7,7 @@
 	"info": {
 		"title": "Expedite Partners API",
 		"version": "1.0.0",
-		"description": "Approved partners invite founders to finish incorporation in Expedite and follow their referrals. Version 1 supports Delaware C Corporations. Partner access is enabled by Expedite; the API does not enroll a new partner.\n\n## Getting started\n\nExpedite enables your partner organization and configures its environment. An integration manager creates an API client in Partner Console → Integration. Keep development and production credentials separate; Expedite can provide sandbox access for simulation. A token's environment comes from its client; a request cannot choose another partner or environment.\n\n1. POST /token with grant_type=client_credentials, client_id and client_secret. JSON and application/x-www-form-urlencoded bodies are accepted. Save secrets on your server. Tokens last one hour; reuse them until expiry.\n2. POST /incorporations with a Bearer token and an Idempotency-Key header. The body contains externalReference, email, givenName, familyName and an optional companyName. lane, when supplied, must be US_DE_C_CORP. An optional partnerCode must match your registered partner.\n3. Save the returned referral ID. In production the operation queues an invitation; it does not sign documents, charge the founder, submit a filing or create a bank application. The founder signs in as the invited recipient and chooses or creates their organization.\n4. In sandbox, POST /sandbox/incorporations/{referralId}/simulate with a scenario: INVITED, CLAIMED, SUBMITTED, FILING, INCORPORATED or EIN_ISSUED. These scenarios send no founder email and create no real case, documents, payment, filing or bank account.\n5. GET /incorporations/{referralId} to read current status, or configure an endpoint to receive update notifications. Public documentation disables interactive requests; use your sandbox credentials from your own server or API client.\n\nExample create body:\n\n```json\n{\n  \"externalReference\": \"partner-sandbox-formation-001\",\n  \"email\": \"founder@example.com\",\n  \"givenName\": \"Jane\",\n  \"familyName\": \"Doe\",\n  \"companyName\": \"Example Labs\",\n  \"lane\": \"US_DE_C_CORP\"\n}\n```\n\n## Authentication and permissions\n\nSend Authorization: Bearer <access_token>. Clients have explicit create, read, invitation, document-read and webhook-management scopes. A permission is effective only while the partner and client remain enabled. Partner codes are attribution, never authentication. Rotating a client secret invalidates its older access tokens. A partner never becomes a member of a founder's organization through a referral.\n\n## Idempotency, pagination and errors\n\nCreate and invitation resend require Idempotency-Key. Retry an uncertain response with the same key and identical input. Keys are scoped to your partner, environment and operation. Reusing a key with changed input returns 409. externalReference also identifies one referral within the partner and environment; a conflicting create returns 409. A create retry does not send another invitation. To resend, call the explicit invitation operation with its own key. One founder can form multiple companies with distinct references.\n\nList responses contain items, nextCursor and totalCount. Send nextCursor as cursor for the next page. limit is at most 100. search matches only your authorized referrals. Webhook delivery history uses its returned next object as before[createdAt] and before[id] query parameters.\n\nErrors have an error object containing code, message and requestId, with issues for invalid fields when available. The X-Request-Id response header identifies the same request. Use 400 to correct inputs, 401 to refresh credentials or resolve disabled access, 403 for missing permission, 404 for missing or inaccessible records, and 409 for a conflict requiring review. A 429 includes Retry-After; wait at least that long. Retry transient 5xx responses with backoff and the original idempotency key. Never place secrets in URLs, logs or support messages.\n\n## Progress and document sharing\n\nThe partner initially sees its own invitation receipt. Coarse case tracking starts when the intended founder accepts the disclosed referral. Invitation, formation and EIN state are independent: sent is not delivered, submitted is not incorporated, and incorporated is not EIN issued. FILING means the canonical filing-order submission is recorded as delivered, with filingOrderedAt; it does not attest state acceptance. submittedAt records the founder’s submission. Each response carries the published invitation/progress version. Compare versions when processing notifications and fetch the current snapshot. Detail-only fields, including workflowSteps and currently shared documents, are evaluated on read and may change without advancing that version or sending a webhook; refresh the detail when your user opens the referral.\n\nAt final submission, the founder can separately allow access to the reviewed formation certificate and verified IRS EIN notice. Documents appear only after that grant and the relevant evidence is ready. Internal notes, identity documents, SS-4 applications and unrelated company files are not part of this API. A shared official artifact can itself contain the company EIN or signatures.\n\nWithdrawing document sharing stops future document access while disclosed progress continues. Download links expire after 60 seconds; a previously issued link may work until expiry. Withdrawal cannot erase a copy already retained by a partner. Suspended partner access and canceled referrals also stop eligible reads and notifications. Referring-bank links are registered by Expedite and do not attest account approval.\n\n## Webhooks\n\nRegister an HTTPS endpoint and store its one-time signing secret. Registration is inactive until POST /webhook-endpoints/{endpointId}/verify receives a 2xx response to a signed endpoint.verification event. Redirects are not followed, and non-public network destinations are rejected.\n\nProgress notifications use this body only:\n\n```json\n{\"id\":\"event_id\",\"type\":\"incorporation.updated\",\"referralId\":\"referral_id\",\"version\":2,\"createdAt\":\"2026-11-08T12:00:00.000Z\"}\n```\n\nVerify before parsing or acting. Read webhook-id, webhook-timestamp and webhook-signature. The timestamp is Unix seconds. Reject timestamps outside a five-minute tolerance, compute HMAC-SHA256 using the signing secret as its exact UTF-8 string over id + \".\" + timestamp + \".\" + the exact raw HTTP body, encode the digest in base64 and compare the result with the value after \"v1,\" using a constant-time comparison. Check webhook-id against the signed body's id. Verification events use id, type endpoint.verification and createdAt, without a referral ID.\n\nReturn 2xx promptly. Delivery is at least once and can be out of order. Deduplicate by event ID, compare resource versions, and fetch the current authorized referral. Each endpoint/event pair receives up to eight attempts per delivery cycle, with exponential backoff beginning at one minute. An explicit replay opens another bounded cycle for the same event ID and preserves attempt history. A timed-out or interrupted request may already have reached your server.\n\nDelivery history and its latest 100 attempt records expose HTTP status and safe error codes. No response body from your endpoint is retained. Current partner/referral authority is checked before delivery and replay. Document-only changes are not separate webhook events. Secret rotation replaces the signing key for later attempts; an already in-flight request may still carry its earlier signature. Disable an endpoint to stop future delivery, then verify it again to reactivate.\n\n## Notify your system when an EIN is issued\n\nEIN issuance uses the same incorporation.updated webhook. There is no separate subscription or EIN number in the callback. A submitted SS-4 or uploaded, unverified notice does not mean an EIN has been issued: Expedite reports ISSUED only after the EIN is verified from the canonical evidence.\n\n1. Register and verify your HTTPS endpoint. Your server needs incorporations:read to fetch progress; use webhooks:manage to configure delivery through the API.\n2. Verify the callback signature and durably accept the event before returning 2xx. Queue processing, deduplicate by event ID, and use referralId to identify the referral you created.\n3. GET /incorporations/{referralId} with your Bearer token. Check progress.ein for ISSUED and progress.einIssuedAt for the verification timestamp. The response's version may already be newer than the event; process the current snapshot and never replace it with an older version.\n4. Record the issued milestone idempotently in your system. The status response does not contain the EIN number. Progress remains available when the founder declines or later withdraws optional document sharing.\n5. If you need the IRS notice, use a client with incorporation_documents:read. GET /incorporations/{referralId}/documents lists an EIN_NOTICE only when the founder currently grants sharing and verified evidence is available. POST /incorporations/{referralId}/documents/{documentId}/download returns a download link valid for 60 seconds. Recheck access when requesting a new link; a revoked grant stops future downloads.\n\nRelevant fields from the progress response:\n\n```json\n{\n  \"id\": \"referral_id\",\n  \"version\": 7,\n  \"progress\": {\n    \"ein\": \"ISSUED\",\n    \"einIssuedAt\": \"2026-11-09T12:00:00.000Z\"\n  }\n}\n```\n\nThis is a response excerpt, not the full referral object. A notification is a prompt to fetch authorized state, not permission to read a document. If the EIN was issued before your endpoint became active, fetch the current referral to catch up. A later document-sharing grant is not a separate webhook event; query the document list when the founder completes that sharing step. Use delivery history and replay to recover exhausted deliveries, retaining event-ID deduplication across replay.\n\n## Versioning\n\nThe API contract is /api/partners/v1. The generated OpenAPI document describes the same router and service schemas that handle requests; it excludes internal customer and staff procedures. Treat added optional response fields as compatible changes. Breaking contract changes require another version. Release notes should identify behavior changes before a partner production rollout.\n"
+		"description": "Approved partners invite founders to complete a Delaware C Corporation in Expedite, track incorporation progress, and receive signed updates. Document access requires the founder's separate permission."
 	},
 	"security": [
 		{
@@ -29,7 +29,8 @@
 						"description": "Event ID. Match it to the signed body and deduplicate by this value across retries.",
 						"schema": {
 							"type": "string"
-						}
+						},
+						"example": "evt_progress_07"
 					},
 					{
 						"name": "webhook-timestamp",
@@ -57,6 +58,13 @@
 						"application/json": {
 							"schema": {
 								"$ref": "#/components/schemas/PartnerProgressEvent"
+							},
+							"example": {
+								"id": "evt_progress_07",
+								"createdAt": "2026-11-19T14:30:00.000Z",
+								"type": "incorporation.updated",
+								"referralId": "ref_atlas_labs_001",
+								"version": 7
 							}
 						}
 					}
@@ -82,7 +90,8 @@
 						"description": "Event ID. Match it to the signed body and deduplicate by this value across retries.",
 						"schema": {
 							"type": "string"
-						}
+						},
+						"example": "verification_example_1042"
 					},
 					{
 						"name": "webhook-timestamp",
@@ -110,6 +119,11 @@
 						"application/json": {
 							"schema": {
 								"$ref": "#/components/schemas/WebhookVerificationEvent"
+							},
+							"example": {
+								"id": "verification_example_1042",
+								"createdAt": "2026-11-09T10:00:00.000Z",
+								"type": "endpoint.verification"
 							}
 						}
 					}
@@ -207,7 +221,9 @@
 								"type": "object",
 								"properties": {
 									"grant_type": {
-										"const": "client_credentials"
+										"const": "client_credentials",
+										"type": "string",
+										"enum": ["client_credentials"]
 									},
 									"client_id": {
 										"type": "string",
@@ -225,6 +241,12 @@
 									}
 								},
 								"required": ["grant_type", "client_id", "client_secret"]
+							},
+							"example": {
+								"grant_type": "client_credentials",
+								"client_id": "example_client_id",
+								"client_secret": "example_client_secret",
+								"scope": "incorporations:create incorporations:read incorporation_documents:read webhooks:manage"
 							}
 						},
 						"application/x-www-form-urlencoded": {
@@ -232,7 +254,9 @@
 								"type": "object",
 								"properties": {
 									"grant_type": {
-										"const": "client_credentials"
+										"const": "client_credentials",
+										"type": "string",
+										"enum": ["client_credentials"]
 									},
 									"client_id": {
 										"type": "string",
@@ -250,6 +274,12 @@
 									}
 								},
 								"required": ["grant_type", "client_id", "client_secret"]
+							},
+							"example": {
+								"grant_type": "client_credentials",
+								"client_id": "example_client_id",
+								"client_secret": "example_client_secret",
+								"scope": "incorporations:create incorporations:read incorporation_documents:read webhooks:manage"
 							}
 						}
 					}
@@ -266,7 +296,9 @@
 											"type": "string"
 										},
 										"token_type": {
-											"const": "Bearer"
+											"const": "Bearer",
+											"type": "string",
+											"enum": ["Bearer"]
 										},
 										"expires_in": {
 											"type": "number"
@@ -276,6 +308,12 @@
 										}
 									},
 									"required": ["access_token", "token_type", "expires_in", "scope"]
+								},
+								"example": {
+									"access_token": "exp_partner_example_token",
+									"token_type": "Bearer",
+									"expires_in": 3600,
+									"scope": "incorporations:create incorporations:read incorporation_documents:read webhooks:manage"
 								}
 							}
 						}
@@ -331,6 +369,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -386,6 +431,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -441,6 +493,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -496,6 +555,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -551,6 +617,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -606,6 +679,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -627,8 +707,10 @@
 						"schema": {
 							"type": "string",
 							"minLength": 1,
-							"maxLength": 160
-						}
+							"maxLength": 160,
+							"example": "atlas-labs-incorporation-001"
+						},
+						"example": "atlas-labs-incorporation-001"
 					}
 				],
 				"requestBody": {
@@ -668,7 +750,9 @@
 										"description": "Proposed company name"
 									},
 									"lane": {
-										"const": "US_DE_C_CORP"
+										"const": "US_DE_C_CORP",
+										"type": "string",
+										"enum": ["US_DE_C_CORP"]
 									},
 									"partnerCode": {
 										"type": "string",
@@ -676,6 +760,14 @@
 									}
 								},
 								"required": ["externalReference", "email", "givenName", "familyName"]
+							},
+							"example": {
+								"externalReference": "atlas-labs-001",
+								"email": "alex@example.com",
+								"givenName": "Alex",
+								"familyName": "Morgan",
+								"companyName": "Atlas Labs",
+								"lane": "US_DE_C_CORP"
 							}
 						}
 					}
@@ -726,7 +818,9 @@
 											]
 										},
 										"lane": {
-											"const": "US_DE_C_CORP"
+											"const": "US_DE_C_CORP",
+											"type": "string",
+											"enum": ["US_DE_C_CORP"]
 										},
 										"invitation": {
 											"type": "object",
@@ -989,6 +1083,40 @@
 										"documents",
 										"invitationHistory"
 									]
+								},
+								"example": {
+									"id": "ref_atlas_labs_001",
+									"externalReference": "atlas-labs-001",
+									"environment": "SANDBOX",
+									"email": "alex@example.com",
+									"givenName": "Alex",
+									"familyName": "Morgan",
+									"companyName": "Atlas Labs",
+									"lane": "US_DE_C_CORP",
+									"invitation": {
+										"status": "QUEUED",
+										"expiresAt": "2026-11-16T10:00:00.000Z"
+									},
+									"progress": null,
+									"documentSharing": {
+										"granted": false,
+										"updatedAt": null
+									},
+									"claimedAt": null,
+									"canceledAt": null,
+									"createdAt": "2026-11-09T10:00:00.000Z",
+									"updatedAt": "2026-11-09T10:00:00.000Z",
+									"version": 1,
+									"documents": [],
+									"workflowSteps": [],
+									"invitationHistory": [
+										{
+											"id": "inv_atlas_labs_001",
+											"status": "QUEUED",
+											"createdAt": "2026-11-09T10:00:00.000Z",
+											"expiresAt": "2026-11-16T10:00:00.000Z"
+										}
+									]
 								}
 							}
 						}
@@ -1044,6 +1172,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1099,6 +1234,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1154,6 +1296,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1209,6 +1358,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1264,6 +1420,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1319,6 +1482,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1339,20 +1509,24 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"maxLength": 200
+							"maxLength": 200,
+							"example": "Atlas Labs"
 						},
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": "Atlas Labs"
 					},
 					{
 						"name": "externalReference",
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"maxLength": 160
+							"maxLength": 160,
+							"example": "atlas-labs-001"
 						},
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": "atlas-labs-001"
 					},
 					{
 						"name": "formation",
@@ -1365,33 +1539,39 @@
 								"INCORPORATED",
 								"ACTION_REQUIRED",
 								"UNAVAILABLE"
-							]
+							],
+							"example": "INCORPORATED"
 						},
 						"style": "deepObject",
 						"explode": true,
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": "INCORPORATED"
 					},
 					{
 						"name": "ein",
 						"in": "query",
 						"schema": {
-							"enum": ["NOT_REQUESTED", "PENDING", "ISSUED"]
+							"enum": ["NOT_REQUESTED", "PENDING", "ISSUED"],
+							"example": "ISSUED"
 						},
 						"style": "deepObject",
 						"explode": true,
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": "ISSUED"
 					},
 					{
 						"name": "updatedAfter",
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"format": "date-time"
+							"format": "date-time",
+							"example": "2026-11-01T00:00:00.000Z"
 						},
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": "2026-11-01T00:00:00.000Z"
 					},
 					{
 						"name": "cursor",
@@ -1409,10 +1589,12 @@
 						"schema": {
 							"type": "integer",
 							"minimum": 1,
-							"maximum": 100
+							"maximum": 100,
+							"example": 25
 						},
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": 25
 					}
 				],
 				"responses": {
@@ -1458,7 +1640,9 @@
 														]
 													},
 													"lane": {
-														"const": "US_DE_C_CORP"
+														"const": "US_DE_C_CORP",
+														"type": "string",
+														"enum": ["US_DE_C_CORP"]
 													},
 													"invitation": {
 														"type": "object",
@@ -1671,6 +1855,36 @@
 										}
 									},
 									"required": ["items", "nextCursor", "totalCount"]
+								},
+								"example": {
+									"items": [
+										{
+											"id": "ref_atlas_labs_001",
+											"externalReference": "atlas-labs-001",
+											"environment": "SANDBOX",
+											"email": "alex@example.com",
+											"givenName": "Alex",
+											"familyName": "Morgan",
+											"companyName": "Atlas Labs",
+											"lane": "US_DE_C_CORP",
+											"invitation": {
+												"status": "QUEUED",
+												"expiresAt": "2026-11-16T10:00:00.000Z"
+											},
+											"progress": null,
+											"documentSharing": {
+												"granted": false,
+												"updatedAt": null
+											},
+											"claimedAt": null,
+											"canceledAt": null,
+											"createdAt": "2026-11-09T10:00:00.000Z",
+											"updatedAt": "2026-11-09T10:00:00.000Z",
+											"version": 1
+										}
+									],
+									"nextCursor": null,
+									"totalCount": 1
 								}
 							}
 						}
@@ -1726,6 +1940,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1781,6 +2002,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1836,6 +2064,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1891,6 +2126,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -1946,6 +2188,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2001,6 +2250,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2024,8 +2280,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "ref_atlas_labs_001"
+						},
+						"example": "ref_atlas_labs_001"
 					}
 				],
 				"responses": {
@@ -2066,7 +2324,9 @@
 											]
 										},
 										"lane": {
-											"const": "US_DE_C_CORP"
+											"const": "US_DE_C_CORP",
+											"type": "string",
+											"enum": ["US_DE_C_CORP"]
 										},
 										"invitation": {
 											"type": "object",
@@ -2329,6 +2589,62 @@
 										"documents",
 										"invitationHistory"
 									]
+								},
+								"example": {
+									"id": "ref_atlas_labs_001",
+									"externalReference": "atlas-labs-001",
+									"environment": "PRODUCTION",
+									"email": "alex@example.com",
+									"givenName": "Alex",
+									"familyName": "Morgan",
+									"companyName": "Atlas Labs",
+									"lane": "US_DE_C_CORP",
+									"invitation": {
+										"status": "CLAIMED",
+										"expiresAt": "2026-11-16T10:00:00.000Z"
+									},
+									"progress": {
+										"formation": "INCORPORATED",
+										"ein": "ISSUED",
+										"submittedAt": "2026-11-09T11:00:00.000Z",
+										"filingOrderedAt": "2026-11-10T10:00:00.000Z",
+										"incorporatedAt": "2026-11-11T16:00:00.000Z",
+										"einIssuedAt": "2026-11-19T14:30:00.000Z",
+										"nextActor": "NONE",
+										"nextAction": "Formation and EIN ready"
+									},
+									"documentSharing": {
+										"granted": true,
+										"updatedAt": "2026-11-09T11:00:00.000Z"
+									},
+									"claimedAt": "2026-11-09T10:05:00.000Z",
+									"canceledAt": null,
+									"createdAt": "2026-11-09T10:00:00.000Z",
+									"updatedAt": "2026-11-19T14:30:00.000Z",
+									"version": 7,
+									"documents": [
+										{
+											"id": "document_example_formation",
+											"kind": "FORMATION_CERTIFICATE",
+											"name": "Certificate of incorporation",
+											"availableAt": "2026-11-11T16:00:00.000Z"
+										},
+										{
+											"id": "document_example_ein",
+											"kind": "EIN_NOTICE",
+											"name": "IRS EIN confirmation",
+											"availableAt": "2026-11-19T14:30:00.000Z"
+										}
+									],
+									"workflowSteps": [],
+									"invitationHistory": [
+										{
+											"id": "inv_atlas_labs_001",
+											"status": "CLAIMED",
+											"createdAt": "2026-11-09T10:00:00.000Z",
+											"expiresAt": "2026-11-16T10:00:00.000Z"
+										}
+									]
 								}
 							}
 						}
@@ -2384,6 +2700,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2439,6 +2762,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2494,6 +2824,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2549,6 +2886,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2604,6 +2948,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2659,6 +3010,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -2681,8 +3039,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "ref_atlas_labs_001"
+						},
+						"example": "ref_atlas_labs_001"
 					}
 				],
 				"responses": {
@@ -2723,7 +3083,9 @@
 											]
 										},
 										"lane": {
-											"const": "US_DE_C_CORP"
+											"const": "US_DE_C_CORP",
+											"type": "string",
+											"enum": ["US_DE_C_CORP"]
 										},
 										"invitation": {
 											"type": "object",
@@ -2986,6 +3348,40 @@
 										"documents",
 										"invitationHistory"
 									]
+								},
+								"example": {
+									"id": "ref_atlas_labs_001",
+									"externalReference": "atlas-labs-001",
+									"environment": "SANDBOX",
+									"email": "alex@example.com",
+									"givenName": "Alex",
+									"familyName": "Morgan",
+									"companyName": "Atlas Labs",
+									"lane": "US_DE_C_CORP",
+									"invitation": {
+										"status": "CANCELED",
+										"expiresAt": "2026-11-16T10:00:00.000Z"
+									},
+									"progress": null,
+									"documentSharing": {
+										"granted": false,
+										"updatedAt": null
+									},
+									"claimedAt": null,
+									"canceledAt": "2026-11-09T10:05:00.000Z",
+									"createdAt": "2026-11-09T10:00:00.000Z",
+									"updatedAt": "2026-11-09T10:05:00.000Z",
+									"version": 2,
+									"documents": [],
+									"workflowSteps": [],
+									"invitationHistory": [
+										{
+											"id": "inv_atlas_labs_001",
+											"status": "CANCELED",
+											"createdAt": "2026-11-09T10:00:00.000Z",
+											"expiresAt": "2026-11-16T10:00:00.000Z"
+										}
+									]
 								}
 							}
 						}
@@ -3041,6 +3437,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3096,6 +3499,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3151,6 +3561,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3206,6 +3623,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3261,6 +3685,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3316,6 +3747,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3339,8 +3777,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "ref_atlas_labs_001"
+						},
+						"example": "ref_atlas_labs_001"
 					},
 					{
 						"name": "idempotency-key",
@@ -3349,8 +3789,10 @@
 						"schema": {
 							"type": "string",
 							"minLength": 1,
-							"maxLength": 160
-						}
+							"maxLength": 160,
+							"example": "atlas-labs-incorporation-001"
+						},
+						"example": "atlas-labs-incorporation-001"
 					}
 				],
 				"responses": {
@@ -3391,7 +3833,9 @@
 											]
 										},
 										"lane": {
-											"const": "US_DE_C_CORP"
+											"const": "US_DE_C_CORP",
+											"type": "string",
+											"enum": ["US_DE_C_CORP"]
 										},
 										"invitation": {
 											"type": "object",
@@ -3654,6 +4098,40 @@
 										"documents",
 										"invitationHistory"
 									]
+								},
+								"example": {
+									"id": "ref_atlas_labs_001",
+									"externalReference": "atlas-labs-001",
+									"environment": "SANDBOX",
+									"email": "alex@example.com",
+									"givenName": "Alex",
+									"familyName": "Morgan",
+									"companyName": "Atlas Labs",
+									"lane": "US_DE_C_CORP",
+									"invitation": {
+										"status": "QUEUED",
+										"expiresAt": "2026-11-16T10:00:00.000Z"
+									},
+									"progress": null,
+									"documentSharing": {
+										"granted": false,
+										"updatedAt": null
+									},
+									"claimedAt": null,
+									"canceledAt": null,
+									"createdAt": "2026-11-09T10:00:00.000Z",
+									"updatedAt": "2026-11-09T10:00:00.000Z",
+									"version": 1,
+									"documents": [],
+									"workflowSteps": [],
+									"invitationHistory": [
+										{
+											"id": "inv_atlas_labs_001",
+											"status": "QUEUED",
+											"createdAt": "2026-11-09T10:00:00.000Z",
+											"expiresAt": "2026-11-16T10:00:00.000Z"
+										}
+									]
 								}
 							}
 						}
@@ -3709,6 +4187,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3764,6 +4249,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3819,6 +4311,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3874,6 +4373,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3929,6 +4435,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -3984,6 +4497,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4007,8 +4527,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "ref_atlas_labs_001"
+						},
+						"example": "ref_atlas_labs_001"
 					}
 				],
 				"responses": {
@@ -4037,7 +4559,21 @@
 										},
 										"required": ["id", "kind", "name", "availableAt"]
 									}
-								}
+								},
+								"example": [
+									{
+										"id": "document_example_formation",
+										"kind": "FORMATION_CERTIFICATE",
+										"name": "Certificate of incorporation",
+										"availableAt": "2026-11-11T16:00:00.000Z"
+									},
+									{
+										"id": "document_example_ein",
+										"kind": "EIN_NOTICE",
+										"name": "IRS EIN confirmation",
+										"availableAt": "2026-11-19T14:30:00.000Z"
+									}
+								]
 							}
 						}
 					},
@@ -4092,6 +4628,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4147,6 +4690,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4202,6 +4752,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4257,6 +4814,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4312,6 +4876,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4367,6 +4938,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4390,8 +4968,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "ref_atlas_labs_001"
+						},
+						"example": "ref_atlas_labs_001"
 					},
 					{
 						"name": "documentId",
@@ -4399,8 +4979,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "document_example_ein"
+						},
+						"example": "document_example_ein"
 					}
 				],
 				"responses": {
@@ -4421,6 +5003,10 @@
 										}
 									},
 									"required": ["url", "expiresAt"]
+								},
+								"example": {
+									"url": "https://example.com/documents/ein-notice.pdf?signature=example",
+									"expiresAt": "2026-11-19T14:31:00.000Z"
 								}
 							}
 						}
@@ -4476,6 +5062,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4531,6 +5124,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4586,6 +5186,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4641,6 +5248,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4696,6 +5310,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4751,6 +5372,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -4775,8 +5403,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "ref_atlas_labs_001"
+						},
+						"example": "ref_atlas_labs_001"
 					}
 				],
 				"requestBody": {
@@ -4798,6 +5428,9 @@
 									}
 								},
 								"required": ["scenario"]
+							},
+							"example": {
+								"scenario": "EIN_ISSUED"
 							}
 						}
 					}
@@ -4840,7 +5473,9 @@
 											]
 										},
 										"lane": {
-											"const": "US_DE_C_CORP"
+											"const": "US_DE_C_CORP",
+											"type": "string",
+											"enum": ["US_DE_C_CORP"]
 										},
 										"invitation": {
 											"type": "object",
@@ -5103,6 +5738,49 @@
 										"documents",
 										"invitationHistory"
 									]
+								},
+								"example": {
+									"id": "ref_atlas_labs_001",
+									"externalReference": "atlas-labs-001",
+									"environment": "SANDBOX",
+									"email": "alex@example.com",
+									"givenName": "Alex",
+									"familyName": "Morgan",
+									"companyName": "Atlas Labs",
+									"lane": "US_DE_C_CORP",
+									"invitation": {
+										"status": "CLAIMED",
+										"expiresAt": "2026-11-16T10:00:00.000Z"
+									},
+									"progress": {
+										"formation": "INCORPORATED",
+										"ein": "ISSUED",
+										"submittedAt": "2026-11-09T10:05:00.000Z",
+										"filingOrderedAt": "2026-11-09T10:05:00.000Z",
+										"incorporatedAt": "2026-11-09T10:05:00.000Z",
+										"einIssuedAt": "2026-11-09T10:05:00.000Z",
+										"nextActor": "NONE",
+										"nextAction": "Formation and EIN ready"
+									},
+									"documentSharing": {
+										"granted": false,
+										"updatedAt": null
+									},
+									"claimedAt": "2026-11-09T10:05:00.000Z",
+									"canceledAt": null,
+									"createdAt": "2026-11-09T10:00:00.000Z",
+									"updatedAt": "2026-11-09T10:05:00.000Z",
+									"version": 2,
+									"documents": [],
+									"workflowSteps": [],
+									"invitationHistory": [
+										{
+											"id": "inv_atlas_labs_001",
+											"status": "CLAIMED",
+											"createdAt": "2026-11-09T10:00:00.000Z",
+											"expiresAt": "2026-11-16T10:00:00.000Z"
+										}
+									]
 								}
 							}
 						}
@@ -5158,6 +5836,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5213,6 +5898,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5268,6 +5960,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5323,6 +6022,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5378,6 +6084,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5433,6 +6146,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5466,6 +6186,9 @@
 								},
 								"required": ["url"],
 								"additionalProperties": false
+							},
+							"example": {
+								"url": "https://partners.example.com/webhooks/expedite"
 							}
 						}
 					}
@@ -5558,6 +6281,20 @@
 									},
 									"required": ["secret", "endpoint"],
 									"additionalProperties": false
+								},
+								"example": {
+									"secret": "example_signing_secret_replace_with_issued_value",
+									"endpoint": {
+										"partnerId": "partner_example",
+										"environment": "SANDBOX",
+										"url": "https://partners.example.com/webhooks/expedite",
+										"id": "wh_atlas_labs_001",
+										"active": false,
+										"createdAt": "2026-11-09T10:00:00.000Z",
+										"verifiedAt": null,
+										"secretRotatedAt": null,
+										"disabledAt": null
+									}
 								}
 							}
 						}
@@ -5613,6 +6350,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5668,6 +6412,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5723,6 +6474,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5778,6 +6536,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5833,6 +6598,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5888,6 +6660,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -5982,7 +6761,20 @@
 										],
 										"additionalProperties": false
 									}
-								}
+								},
+								"example": [
+									{
+										"partnerId": "partner_example",
+										"environment": "SANDBOX",
+										"url": "https://partners.example.com/webhooks/expedite",
+										"id": "wh_atlas_labs_001",
+										"active": true,
+										"createdAt": "2026-11-09T10:00:00.000Z",
+										"verifiedAt": "2026-11-09T10:01:00.000Z",
+										"secretRotatedAt": null,
+										"disabledAt": null
+									}
+								]
 							}
 						}
 					},
@@ -6037,6 +6829,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6092,6 +6891,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6147,6 +6953,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6202,6 +7015,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6257,6 +7077,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6312,6 +7139,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6335,8 +7169,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "wh_atlas_labs_001"
+						},
+						"example": "wh_atlas_labs_001"
 					}
 				],
 				"responses": {
@@ -6416,6 +7252,17 @@
 										"disabledAt"
 									],
 									"additionalProperties": false
+								},
+								"example": {
+									"partnerId": "partner_example",
+									"environment": "SANDBOX",
+									"url": "https://partners.example.com/webhooks/expedite",
+									"id": "wh_atlas_labs_001",
+									"active": true,
+									"createdAt": "2026-11-09T10:00:00.000Z",
+									"verifiedAt": "2026-11-09T10:01:00.000Z",
+									"secretRotatedAt": null,
+									"disabledAt": null
 								}
 							}
 						}
@@ -6471,6 +7318,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6526,6 +7380,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6581,6 +7442,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6636,6 +7504,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6691,6 +7566,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6746,6 +7628,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6769,8 +7658,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "wh_atlas_labs_001"
+						},
+						"example": "wh_atlas_labs_001"
 					}
 				],
 				"responses": {
@@ -6788,6 +7679,9 @@
 									},
 									"required": ["secret"],
 									"additionalProperties": false
+								},
+								"example": {
+									"secret": "example_signing_secret_replace_with_issued_value"
 								}
 							}
 						}
@@ -6843,6 +7737,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6898,6 +7799,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -6953,6 +7861,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7008,6 +7923,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7063,6 +7985,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7118,6 +8047,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7141,8 +8077,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "wh_atlas_labs_001"
+						},
+						"example": "wh_atlas_labs_001"
 					}
 				],
 				"responses": {
@@ -7158,6 +8096,9 @@
 										}
 									},
 									"required": ["disabled"]
+								},
+								"example": {
+									"disabled": true
 								}
 							}
 						}
@@ -7213,6 +8154,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7268,6 +8216,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7323,6 +8278,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7378,6 +8340,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7433,6 +8402,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7488,6 +8464,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7510,10 +8493,12 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"minLength": 1
+							"minLength": 1,
+							"example": "wh_atlas_labs_001"
 						},
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": "wh_atlas_labs_001"
 					},
 					{
 						"name": "before",
@@ -7545,10 +8530,12 @@
 							"type": "integer",
 							"minimum": 1,
 							"maximum": 100,
-							"default": 25
+							"default": 25,
+							"example": 25
 						},
 						"allowEmptyValue": true,
-						"allowReserved": true
+						"allowReserved": true,
+						"example": 25
 					}
 				],
 				"responses": {
@@ -7675,6 +8662,25 @@
 									},
 									"required": ["items", "next"],
 									"additionalProperties": false
+								},
+								"example": {
+									"items": [
+										{
+											"id": "delivery_example_1042",
+											"endpointId": "wh_atlas_labs_001",
+											"eventId": "evt_progress_07",
+											"referralId": "ref_atlas_labs_001",
+											"version": 7,
+											"attempts": 1,
+											"attemptLimit": 8,
+											"nextAttemptAt": "2026-11-19T14:30:00.000Z",
+											"deliveredAt": "2026-11-19T14:30:00.000Z",
+											"lastStatus": 204,
+											"lastError": null,
+											"createdAt": "2026-11-19T14:30:00.000Z"
+										}
+									],
+									"next": null
 								}
 							}
 						}
@@ -7730,6 +8736,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7785,6 +8798,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7840,6 +8860,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7895,6 +8922,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -7950,6 +8984,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8005,6 +9046,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8028,8 +9076,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "delivery_example_1042"
+						},
+						"example": "delivery_example_1042"
 					}
 				],
 				"responses": {
@@ -8086,7 +9136,16 @@
 										"required": ["id", "attemptedAt", "completedAt", "httpStatus", "errorCode"],
 										"additionalProperties": false
 									}
-								}
+								},
+								"example": [
+									{
+										"id": "attempt_example_1042",
+										"attemptedAt": "2026-11-19T14:30:00.000Z",
+										"completedAt": "2026-11-19T14:30:00.250Z",
+										"httpStatus": 204,
+										"errorCode": null
+									}
+								]
 							}
 						}
 					},
@@ -8141,6 +9200,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8196,6 +9262,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8251,6 +9324,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8306,6 +9386,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8361,6 +9448,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8416,6 +9510,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8439,8 +9540,10 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1
-						}
+							"minLength": 1,
+							"example": "delivery_example_1042"
+						},
+						"example": "delivery_example_1042"
 					}
 				],
 				"responses": {
@@ -8456,6 +9559,9 @@
 										}
 									},
 									"required": ["id"]
+								},
+								"example": {
+									"id": "delivery_example_1042"
 								}
 							}
 						}
@@ -8511,6 +9617,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "BAD_REQUEST",
+										"message": "Request validation failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8566,6 +9679,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "UNAUTHORIZED",
+										"message": "Partner authentication failed",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8621,6 +9741,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "FORBIDDEN",
+										"message": "Required permission is missing",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8676,6 +9803,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "NOT_FOUND",
+										"message": "Resource not found",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8731,6 +9865,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "CONFLICT",
+										"message": "The request conflicts with the current resource state",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}
@@ -8786,6 +9927,13 @@
 									},
 									"required": ["error"],
 									"additionalProperties": false
+								},
+								"example": {
+									"error": {
+										"code": "TOO_MANY_REQUESTS",
+										"message": "Request limit reached; retry later",
+										"requestId": "9cf1644fb12e4af6ac9f47780e3a28d7"
+									}
 								}
 							}
 						}

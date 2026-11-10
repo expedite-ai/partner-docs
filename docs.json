@@ -2,21 +2,47 @@
 	"$schema": "https://mintlify.com/docs.json",
 	"theme": "mint",
 	"name": "Expedite Partners",
-	"colors": { "primary": "#153d2d", "light": "#a5beb2", "dark": "#083323" },
-	"logo": { "light": "/brand/wordmark.png", "dark": "/brand/wordmark-dark.png" },
+	"colors": {
+		"primary": "#153d2d",
+		"light": "#a5beb2",
+		"dark": "#083323"
+	},
+	"logo": {
+		"light": "/brand/wordmark.png",
+		"dark": "/brand/wordmark-dark.png"
+	},
 	"favicon": "/brand/icon.png",
-	"appearance": { "default": "light" },
-	"navbar": { "primary": { "type": "button", "label": "Partner Console", "href": "https://app.expedite.now" } },
+	"appearance": {
+		"default": "light"
+	},
+	"navbar": {
+		"primary": {
+			"type": "button",
+			"label": "Partner Console",
+			"href": "https://app.expedite.now"
+		}
+	},
 	"api": {
-		"playground": { "display": "simple", "proxy": false },
-		"examples": { "languages": ["bash", "javascript", "python"] }
+		"playground": {
+			"display": "interactive",
+			"proxy": false,
+			"url": "full"
+		},
+		"examples": {
+			"languages": ["bash", "javascript", "python"],
+			"defaults": "required",
+			"prefill": true
+		}
 	},
 	"navigation": {
 		"tabs": [
 			{
 				"tab": "Guides",
 				"groups": [
-					{ "group": "Get started", "pages": ["index", "guides/quickstart", "guides/authentication"] },
+					{
+						"group": "Get started",
+						"pages": ["index", "guides/quickstart", "guides/authentication"]
+					},
 					{
 						"group": "Incorporations",
 						"pages": ["guides/progress-and-documents", "guides/ein-notifications"]
@@ -27,7 +53,51 @@
 					}
 				]
 			},
-			{ "tab": "API reference", "openapi": "openapi.json" },
+			{
+				"tab": "API reference",
+				"groups": [
+					{
+						"group": "Authentication",
+						"pages": ["api-reference/authentication/token"]
+					},
+					{
+						"group": "Incorporations",
+						"pages": [
+							"api-reference/incorporations/create",
+							"api-reference/incorporations/list",
+							"api-reference/incorporations/get",
+							"api-reference/incorporations/resend",
+							"api-reference/incorporations/cancel"
+						]
+					},
+					{
+						"group": "Documents",
+						"pages": ["api-reference/documents/list", "api-reference/documents/download"]
+					},
+					{
+						"group": "Webhook endpoints",
+						"pages": [
+							"api-reference/webhook-endpoints/create",
+							"api-reference/webhook-endpoints/list",
+							"api-reference/webhook-endpoints/verify",
+							"api-reference/webhook-endpoints/rotate",
+							"api-reference/webhook-endpoints/disable"
+						]
+					},
+					{
+						"group": "Deliveries",
+						"pages": [
+							"api-reference/deliveries/list",
+							"api-reference/deliveries/attempts",
+							"api-reference/deliveries/replay"
+						]
+					},
+					{
+						"group": "Sandbox",
+						"pages": ["api-reference/sandbox/simulate"]
+					}
+				]
+			},
 			{
 				"tab": "Events",
 				"groups": [
@@ -38,5 +108,78 @@
 				]
 			}
 		]
-	}
+	},
+	"styling": {
+		"codeblocks": "system"
+	},
+	"redirects": [
+		{
+			"source": "/api-reference/obtain-a-partner-access-token",
+			"destination": "/api-reference/authentication/token"
+		},
+		{
+			"source": "/api-reference/invite-a-founder-to-complete-an-incorporation",
+			"destination": "/api-reference/incorporations/create"
+		},
+		{
+			"source": "/api-reference/list-your-incorporation-referrals",
+			"destination": "/api-reference/incorporations/list"
+		},
+		{
+			"source": "/api-reference/read-a-referrals-current-permitted-status",
+			"destination": "/api-reference/incorporations/get"
+		},
+		{
+			"source": "/api-reference/queue-a-new-invitation-for-the-same-referral",
+			"destination": "/api-reference/incorporations/resend"
+		},
+		{
+			"source": "/api-reference/cancel-an-unclaimed-invitation",
+			"destination": "/api-reference/incorporations/cancel"
+		},
+		{
+			"source": "/api-reference/list-formation-and-ein-documents-the-founder-shared",
+			"destination": "/api-reference/documents/list"
+		},
+		{
+			"source": "/api-reference/obtain-short-lived-access-to-a-shared-document",
+			"destination": "/api-reference/documents/download"
+		},
+		{
+			"source": "/api-reference/register-an-inactive-https-endpoint",
+			"destination": "/api-reference/webhook-endpoints/create"
+		},
+		{
+			"source": "/api-reference/list-your-webhook-endpoints",
+			"destination": "/api-reference/webhook-endpoints/list"
+		},
+		{
+			"source": "/api-reference/send-a-signed-verification-event-and-activate-on-success",
+			"destination": "/api-reference/webhook-endpoints/verify"
+		},
+		{
+			"source": "/api-reference/replace-the-endpoint-signing-secret",
+			"destination": "/api-reference/webhook-endpoints/rotate"
+		},
+		{
+			"source": "/api-reference/stop-delivery-to-an-endpoint",
+			"destination": "/api-reference/webhook-endpoints/disable"
+		},
+		{
+			"source": "/api-reference/inspect-currently-authorized-delivery-history",
+			"destination": "/api-reference/deliveries/list"
+		},
+		{
+			"source": "/api-reference/read-the-latest-100-delivery-attempts",
+			"destination": "/api-reference/deliveries/attempts"
+		},
+		{
+			"source": "/api-reference/queue-another-bounded-delivery-cycle-for-the-same-event",
+			"destination": "/api-reference/deliveries/replay"
+		},
+		{
+			"source": "/api-reference/advance-a-sandbox-referral-scenario",
+			"destination": "/api-reference/sandbox/simulate"
+		}
+	]
 }

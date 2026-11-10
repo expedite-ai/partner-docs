@@ -1,5 +1,39 @@
 ---
-title: "Authentication and permissions"
+title: "Authentication"
 ---
 
-Send Authorization: Bearer &lt;access_token&gt;. Clients have explicit create, read, invitation, document-read and webhook-management scopes. A permission is effective only while the partner and client remain enabled. Partner codes are attribution, never authentication. Rotating a client secret invalidates its older access tokens. A partner never becomes a member of a founder's organization through a referral.
+API clients belong to an approved partner organization. Create and manage them in **Partner Console → Integration**. Partner codes identify a referral's source; they never replace authentication.
+
+### Get a token
+
+Send your client ID and secret to `POST /token` with `grant_type: "client_credentials"`. JSON and form-encoded requests are accepted. The response contains an `access_token`, its `expires_in` lifetime in seconds, and the granted `scope` string.
+
+```http Authorization header
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```
+
+Store credentials on your server. Send the access token in the header, not in a URL. The token's partner and environment come from the API client.
+
+### Choose permissions
+
+Grant only the operations your integration uses. Requesting a scope cannot grant permissions that the client does not already have.
+
+| Scope                          | Allows                                                     |
+| ------------------------------ | ---------------------------------------------------------- |
+| `incorporations:create`        | Create referrals and advance sandbox scenarios             |
+| `incorporations:read`          | List referrals and read authorized progress                |
+| `incorporations:invite`        | Resend invitations and cancel unclaimed referrals          |
+| `incorporation_documents:read` | List and download documents the founder currently shares   |
+| `webhooks:manage`              | Configure endpoints, inspect deliveries, and replay events |
+
+### Console roles and API scopes
+
+The Partner Console uses your organization's roles. Owners and admins have partner permissions. Ordinary members have none by default; custom roles can grant specific partner capabilities.
+
+An authorized console user chooses an API client's scopes when creating it and cannot grant permissions they do not hold. Tokens can request fewer scopes, but cannot add permissions. Each operation checks the current partner and client permissions and restricts access to that partner's environment and referrals. Document access also requires the founder's current sharing consent.
+
+### Rotate credentials
+
+Rotating the client secret invalidates its older access tokens. Update your server's secret, then request a new token. Disabling the client or partner also removes API access.
+
+A referral never makes your organization a member of the founder's organization. Progress and document access follow their own disclosed permissions.

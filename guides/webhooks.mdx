@@ -2,22 +2,84 @@
 title: "Webhooks"
 ---
 
-Register an HTTPS endpoint and store its one-time signing secret. Registration is inactive until POST /webhook-endpoints/&#123;endpointId&#125;/verify receives a 2xx response to a signed endpoint.verification event. Redirects are not followed, and non-public network destinations are rejected.
+Receive a signed notification when incorporation progress changes. Use the event to fetch the latest referral; the payload contains no EIN number or document.
 
-Progress notifications use this body only:
+### Register your endpoint
 
-```json
+Provide a public HTTPS URL. Registration returns a signing secret once. Store it on your server before continuing.
+
+```bash cURL
+curl https://api.expedite.now/api/partners/v1/webhook-endpoints \
+  --header "Authorization: Bearer $EXPEDITE_ACCESS_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"url": "https://partners.example.com/webhooks/expedite"}'
+```
+
+### Verify the connection
+
+Call `POST /webhook-endpoints/{endpointId}/verify`. Expedite sends a signed `endpoint.verification` event. Verify its signature and return a `2xx` response to activate the endpoint. Redirects are not followed; private network destinations are rejected.
+
+```json Verification event
 {
-	"id": "event_id",
-	"type": "incorporation.updated",
-	"referralId": "referral_id",
-	"version": 2,
-	"createdAt": "2026-11-08T12:00:00.000Z"
+	"id": "evt_verify_01",
+	"type": "endpoint.verification",
+	"createdAt": "2026-11-09T12:00:00.000Z"
 }
 ```
 
-Verify before parsing or acting. Read webhook-id, webhook-timestamp and webhook-signature. The timestamp is Unix seconds. Reject timestamps outside a five-minute tolerance, compute HMAC-SHA256 using the signing secret as its exact UTF-8 string over id + "." + timestamp + "." + the exact raw HTTP body, encode the digest in base64 and compare the result with the value after "v1," using a constant-time comparison. Check webhook-id against the signed body's id. Verification events use id, type endpoint.verification and createdAt, without a referral ID.
+### Handle a progress update
 
-Return 2xx promptly. Delivery is at least once and can be out of order. Deduplicate by event ID, compare resource versions, and fetch the current authorized referral. Each endpoint/event pair receives up to eight attempts per delivery cycle, with exponential backoff beginning at one minute. An explicit replay opens another bounded cycle for the same event ID and preserves attempt history. A timed-out or interrupted request may already have reached your server.
+A verified endpoint receives `incorporation.updated`. Durably accept the event, return `2xx` promptly, and process it in your queue. Deduplicate by `id`, then retrieve the current authorized referral using `referralId`.
 
-Delivery history and its latest 100 attempt records expose HTTP status and safe error codes. No response body from your endpoint is retained. Current partner/referral authority is checked before delivery and replay. Document-only changes are not separate webhook events. Secret rotation replaces the signing key for later attempts; an already in-flight request may still carry its earlier signature. Disable an endpoint to stop future delivery, then verify it again to reactivate.
+```json Incorporation updated
+{
+	"id": "evt_progress_07",
+	"type": "incorporation.updated",
+	"referralId": "ref_atlas_labs_001",
+	"version": 7,
+	"createdAt": "2026-11-09T12:00:00.000Z"
+}
+```
+
+### Verify the signature
+
+Use the exact raw request body before JSON parsing. The headers are `webhook-id`, `webhook-timestamp`, and `webhook-signature`. The timestamp is Unix seconds. The signature is `v1,` followed by a base64 HMAC-SHA256 digest.
+
+```javascript Node.js
+import { createHmac, timingSafeEqual } from "node:crypto"
+
+export function verifyWebhook(rawBody, headers, secret, now = Date.now()) {
+	const id = headers["webhook-id"]
+	const timestamp = headers["webhook-timestamp"]
+	const signature = headers["webhook-signature"]
+	if (
+		typeof id !== "string" ||
+		typeof timestamp !== "string" ||
+		typeof signature !== "string" ||
+		!/^\d+$/.test(timestamp)
+	) {
+		throw new Error("Missing or invalid webhook headers")
+	}
+	if (Math.abs(now / 1000 - Number(timestamp)) > 300) {
+		throw new Error("Webhook timestamp outside tolerance")
+	}
+	const expected = createHmac("sha256", secret).update(`${id}.${timestamp}.`).update(rawBody).digest()
+	const received = Buffer.from(signature.startsWith("v1,") ? signature.slice(3) : "", "base64")
+	if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+		throw new Error("Invalid webhook signature")
+	}
+	const event = JSON.parse(rawBody.toString("utf8"))
+	if (event.id !== id) throw new Error("Webhook event ID mismatch")
+	return event
+}
+```
+
+The signing secret is used as its exact UTF-8 string. Do not decode it from base64. Validate the parsed event against the documented payload before dispatching it to your own handlers.
+
+### Recover a missed delivery
+
+Delivery is at least once and can arrive out of order. Each endpoint/event pair gets up to eight attempts per cycle, with exponential backoff starting at one minute. Replay opens another bounded cycle for the **same event ID** and preserves its history. A timeout may still mean your server received the request.
+
+Inspect delivery history and the latest 100 attempt records for HTTP statuses and safe error codes. Response bodies from your endpoint are not retained. Current partner/referral access is checked again before delivery and replay.
+
+Rotate the signing secret when needed; later attempts use the new key, while an in-flight request can still carry the old signature. Disable an endpoint to stop future delivery, then verify it again to reactivate.

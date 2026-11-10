@@ -2,4 +2,12 @@
 title: "Versioning"
 ---
 
-The API contract is /api/partners/v1. The generated OpenAPI document describes the same router and service schemas that handle requests; it excludes internal customer and staff procedures. Treat added optional response fields as compatible changes. Breaking contract changes require another version. Release notes should identify behavior changes before a partner production rollout.
+The current contract is `/api/partners/v1`. Endpoint schemas are generated from the same oRPC routes and service schemas that validate requests. Internal customer, staff, and MCP procedures are excluded.
+
+### Handle compatible additions
+
+Allow additional response fields and treat new optional fields as compatible changes. Do not infer completion from an unknown state; show the current `nextAction` and retrieve a fresh snapshot.
+
+### Plan for a breaking change
+
+Breaking contract changes require a new API version. Release notes should identify behavior changes before a partner production rollout. Existing clients continue to use their configured version.

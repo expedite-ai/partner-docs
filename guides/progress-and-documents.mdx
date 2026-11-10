@@ -1,9 +1,44 @@
 ---
-title: "Progress and document sharing"
+title: "Progress and documents"
 ---
 
-The partner initially sees its own invitation receipt. Coarse case tracking starts when the intended founder accepts the disclosed referral. Invitation, formation and EIN state are independent: sent is not delivered, submitted is not incorporated, and incorporated is not EIN issued. FILING means the canonical filing-order submission is recorded as delivered, with filingOrderedAt; it does not attest state acceptance. submittedAt records the founder’s submission. Each response carries the published invitation/progress version. Compare versions when processing notifications and fetch the current snapshot. Detail-only fields, including workflowSteps and currently shared documents, are evaluated on read and may change without advancing that version or sending a webhook; refresh the detail when your user opens the referral.
+Track the incorporation independently from its EIN. Read the referral whenever your user opens it, and use webhooks to learn when a published milestone changes.
 
-At final submission, the founder can separately allow access to the reviewed formation certificate and verified IRS EIN notice. Documents appear only after that grant and the relevant evidence is ready. Internal notes, identity documents, SS-4 applications and unrelated company files are not part of this API. A shared official artifact can itself contain the company EIN or signatures.
+### Read the milestones
 
-Withdrawing document sharing stops future document access while disclosed progress continues. Download links expire after 60 seconds; a previously issued link may work until expiry. Withdrawal cannot erase a copy already retained by a partner. Suspended partner access and canceled referrals also stop eligible reads and notifications. Referring-bank links are registered by Expedite and do not attest account approval.
+Tracking begins when the intended founder accepts the disclosed referral. Until then, the API exposes your invitation receipt and `progress` remains `null`.
+
+| Field                 | Meaning                                     |
+| --------------------- | ------------------------------------------- |
+| `invitation.status`   | Invitation delivery and acceptance          |
+| `progress.formation`  | Incorporation progress                      |
+| `progress.ein`        | Federal tax ID progress                     |
+| `progress.nextActor`  | `FOUNDER`, `EXPEDITE`, `PARTNER`, or `NONE` |
+| `progress.nextAction` | The next action to display to your user     |
+
+Formation moves through `IN_PROGRESS`, `SUBMITTED`, `FILING`, and `INCORPORATED`; `ACTION_REQUIRED` and `UNAVAILABLE` describe conditions needing attention. EIN is independently `NOT_REQUESTED`, `PENDING`, or `ISSUED`.
+
+`submittedAt` records founder submission. `FILING` and `filingOrderedAt` mean the filing-order handoff was delivered, not that Delaware approved it. `incorporatedAt` records incorporation approval. `einIssuedAt` records verification of the EIN evidence.
+
+### Follow versions
+
+Compare `version` when processing events and fetch the current snapshot. An event can arrive after a newer version is available.
+
+`workflowSteps` and shared documents are evaluated on read. They can change without a new published version or webhook. Refresh the detail when a user opens the referral.
+
+### Retrieve shared documents
+
+At final submission, the founder may separately share their reviewed formation certificate and verified IRS EIN notice. Your client also needs `incorporation_documents:read`.
+
+1. Call `GET /incorporations/{referralId}/documents`.
+2. Select a `FORMATION_CERTIFICATE` or `EIN_NOTICE` from the returned list.
+3. Call `POST /incorporations/{referralId}/documents/{documentId}/download`.
+4. Use the returned URL within 60 seconds.
+
+Internal notes, identity documents, SS-4 applications, and unrelated company files are excluded. The official shared document can contain an EIN or signatures.
+
+### Respect changes in access
+
+Withdrawing sharing stops new document access; disclosed progress tracking continues. A previously issued URL may work until its 60-second expiry, and revocation cannot erase copies you already retained. Suspended partners and canceled referrals lose eligible reads and notifications.
+
+Expedite registers any referring-bank return link. The link does not assert that a bank account is approved.

@@ -1,46 +1,128 @@
 ---
-title: "Expedite Partner API"
-description: "Invite founders to incorporate, follow their progress, and receive the documents they choose to share."
+title: "Partner API"
+description: "Bring incorporation into your product. Expedite handles the formation workflow."
 ---
 
-Connect your platform to Expedite's Delaware C Corporation workflow. Your customer
-starts with you, completes their incorporation in Expedite, and returns to your
-platform when they are ready.
+Create a referral from your backend. Your customer receives an invitation to
+complete their Delaware C Corporation in Expedite, while your team follows their
+progress through the API or Partner Console.
+
+<RequestExample>
+
+```bash cURL wrap
+EXPEDITE_API=https://api.expedite.now/api/partners/v1
+INVITATION_KEY=atlas-labs-incorporation-001
+
+curl "$EXPEDITE_API/incorporations" \
+  --header "Authorization: Bearer $EXPEDITE_ACCESS_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --header "Idempotency-Key: $INVITATION_KEY" \
+  --data '{
+    "externalReference": "atlas-labs-001",
+    "email": "alex@example.com",
+    "givenName": "Alex",
+    "familyName": "Morgan",
+    "companyName": "Atlas Labs"
+  }'
+```
+
+```javascript JavaScript wrap
+const response = await fetch("https://api.expedite.now/api/partners/v1/incorporations", {
+	method: "POST",
+	headers: {
+		Authorization: `Bearer ${process.env.EXPEDITE_ACCESS_TOKEN}`,
+		"Content-Type": "application/json",
+		"Idempotency-Key": "atlas-labs-incorporation-001",
+	},
+	body: JSON.stringify({
+		externalReference: "atlas-labs-001",
+		email: "alex@example.com",
+		givenName: "Alex",
+		familyName: "Morgan",
+		companyName: "Atlas Labs",
+	}),
+})
+if (!response.ok) throw new Error(`Invitation failed: ${response.status}`)
+const referral = await response.json()
+console.log(referral.id)
+```
+
+```python Python wrap
+import json
+import os
+from urllib.request import Request, urlopen
+
+request = Request("https://api.expedite.now/api/partners/v1/incorporations", data=json.dumps({
+    "externalReference": "atlas-labs-001",
+    "email": "alex@example.com",
+    "givenName": "Alex",
+    "familyName": "Morgan",
+    "companyName": "Atlas Labs",
+}).encode(), headers={
+    "Authorization": "Bearer " + os.environ["EXPEDITE_ACCESS_TOKEN"],
+    "Content-Type": "application/json",
+    "Idempotency-Key": "atlas-labs-incorporation-001",
+})
+with urlopen(request) as response:
+    referral = json.load(response)
+print(referral["id"])
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 201 Created (excerpt)
+{
+	"id": "ref_atlas_labs_001",
+	"externalReference": "atlas-labs-001",
+	"companyName": "Atlas Labs",
+	"invitation": {
+		"status": "QUEUED"
+	},
+	"progress": null,
+	"version": 1
+}
+```
+
+</ResponseExample>
 
 <CardGroup cols={2}>
-	<Card title="Send your first invitation" icon="paper-plane" href="/guides/quickstart">
-		Authenticate, invite a founder, and track the referral from your system.
+	<Card title="Send your first invitation" icon="terminal" href="/guides/quickstart">
+		Get a token, invite a founder, and read their progress.
 	</Card>
-	<Card title="Know when an EIN is issued" icon="bell" href="/guides/ein-notifications">
-		Receive a signed update and retrieve the verified EIN milestone.
-	</Card>
-	<Card title="Follow each incorporation" icon="list-check" href="/guides/progress-and-documents">
-		Understand filing progress and optional document sharing.
-	</Card>
-	<Card title="Explore the Partner API" icon="code" href="/api-reference/obtain-a-partner-access-token">
-		Browse endpoints, request examples, response schemas, and webhook payloads.
+	<Card title="Explore the API" icon="code" href="/api-reference/incorporations/create">
+		Requests, responses, and permissions for every endpoint.
 	</Card>
 </CardGroup>
 
-## From invitation to incorporation
+## One referral, from invitation to EIN
 
 <Steps>
 	<Step title="Invite your customer">
-		Create a referral from your backend with a stable external reference. Expedite sends the founder an invitation
-		to get started.
+		Send their name, email, and your customer reference. Keep the returned referral ID to connect their
+		incorporation to your product.
 	</Step>
-	<Step title="The founder completes their application">
-		The founder signs in, completes the incorporation forms, and signs their documents. At submission, they can
-		optionally share eligible incorporation documents with your organization.
+	<Step title="Let the founder complete their application">
+		The founder signs in, completes the forms, and signs their documents in Expedite. Your dashboard and API reflect
+		the progress they have agreed to share.
 	</Step>
-	<Step title="Stay up to date">
-		Follow formation and EIN progress from your dashboard or API. Signed webhooks tell your server when to fetch the
-		latest referral state.
+	<Step title="Act on verified milestones">
+		Receive a signed webhook when progress changes. Fetch the current status to learn when Delaware approves the
+		company or the EIN is issued.
 	</Step>
 </Steps>
 
-<Note>
-	Partner access is enabled by Expedite. Ask your Expedite contact for your API environment and credentials before
-	making requests. The reference shows the production API address; access depends on your partner's rollout. Run
-	examples from your own server or API client.
-</Note>
+## Build your integration
+
+| Task                                    | Guide                                                        |
+| --------------------------------------- | ------------------------------------------------------------ |
+| Connect your server                     | [Authentication and permissions](/guides/authentication)     |
+| Receive progress updates                | [Webhook setup and signature verification](/guides/webhooks) |
+| Know when an EIN is ready               | [EIN notifications](/guides/ein-notifications)               |
+| Retrieve documents with founder consent | [Progress and documents](/guides/progress-and-documents)     |
+| Recover from retries and failures       | [Retries and errors](/guides/reliability)                    |
+
+Partner access is enabled by Expedite. Once your organization is approved, create
+API credentials in **Partner Console → Integration**. Use sandbox credentials to
+test the workflow before sending a real invitation.

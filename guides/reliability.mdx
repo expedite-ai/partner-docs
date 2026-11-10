@@ -1,9 +1,47 @@
 ---
-title: "Idempotency, pagination and errors"
+title: "Retries and errors"
 ---
 
-Create and invitation resend require Idempotency-Key. Retry an uncertain response with the same key and identical input. Keys are scoped to your partner, environment and operation. Reusing a key with changed input returns 409. externalReference also identifies one referral within the partner and environment; a conflicting create returns 409. A create retry does not send another invitation. To resend, call the explicit invitation operation with its own key. One founder can form multiple companies with distinct references.
+Make retries safe, paginate large referral lists, and use the request ID when investigating a failure.
 
-List responses contain items, nextCursor and totalCount. Send nextCursor as cursor for the next page. limit is at most 100. search matches only your authorized referrals. Webhook delivery history uses its returned next object as before[createdAt] and before[id] query parameters.
+### Retry without creating another invitation
 
-Errors have an error object containing code, message and requestId, with issues for invalid fields when available. The X-Request-Id response header identifies the same request. Use 400 to correct inputs, 401 to refresh credentials or resolve disabled access, 403 for missing permission, 404 for missing or inaccessible records, and 409 for a conflict requiring review. A 429 includes Retry-After; wait at least that long. Retry transient 5xx responses with backoff and the original idempotency key. Never place secrets in URLs, logs or support messages.
+Create and invitation-resend operations require `Idempotency-Key`. After an uncertain response, repeat the same request with the **same key and identical body**. A retry returns the existing result; it does not queue another invitation.
+
+| Situation                       | Result                                 |
+| ------------------------------- | -------------------------------------- |
+| Same key and same input         | Existing operation result              |
+| Same key with different input   | `409 Conflict`                         |
+| Conflicting `externalReference` | `409 Conflict`                         |
+| Explicit resend with a new key  | A new invitation for the same referral |
+
+Keys are scoped to your partner, environment, and operation. `externalReference` also identifies one referral within that partner and environment. One founder can incorporate more than once using distinct references.
+
+### Read the next page
+
+List responses return `items`, `nextCursor`, and `totalCount`. Pass the returned `nextCursor` as `cursor` until it is `null`. The maximum `limit` is 100. Search results and counts include only referrals you can access.
+
+```bash cURL
+curl --get https://api.expedite.now/api/partners/v1/incorporations \
+  --header "Authorization: Bearer $EXPEDITE_ACCESS_TOKEN" \
+  --data-urlencode 'limit=25' \
+  --data-urlencode "cursor=$NEXT_CURSOR"
+```
+
+Webhook delivery history uses its returned `next` object as the `before[createdAt]` and `before[id]` query parameters.
+
+### Handle errors
+
+Errors contain `error.code`, `error.message`, and `error.requestId`. Validation errors can also include field-level `issues`. The `X-Request-Id` response header identifies the same request.
+
+| Status | What to do                                          |
+| ------ | --------------------------------------------------- |
+| `400`  | Correct the input fields                            |
+| `401`  | Refresh an expired token or resolve disabled access |
+| `403`  | Check the client's required scope                   |
+| `404`  | Check the ID and whether your partner may access it |
+| `409`  | Resolve the conflicting key or reference            |
+| `429`  | Wait at least the `Retry-After` duration            |
+| `5xx`  | Retry with backoff and the original idempotency key |
+
+Keep secrets out of URLs, logs, and support messages. Include the request ID when contacting Expedite.

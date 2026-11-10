@@ -1,24 +1,177 @@
 ---
-title: "Getting started"
+title: "Quickstart"
 ---
 
-Expedite enables your partner organization and configures its environment. An integration manager creates an API client in Partner Console → Integration. Keep development and production credentials separate; Expedite can provide sandbox access for simulation. A token's environment comes from its client; a request cannot choose another partner or environment.
+Create your first referral, then follow it through incorporation. You'll need an approved partner organization and API credentials from **Partner Console → Integration**.
 
-1. POST /token with grant_type=client_credentials, client_id and client_secret. JSON and application/x-www-form-urlencoded bodies are accepted. Save secrets on your server. Tokens last one hour; reuse them until expiry.
-2. POST /incorporations with a Bearer token and an Idempotency-Key header. The body contains externalReference, email, givenName, familyName and an optional companyName. lane, when supplied, must be US_DE_C_CORP. An optional partnerCode must match your registered partner.
-3. Save the returned referral ID. In production the operation queues an invitation; it does not sign documents, charge the founder, submit a filing or create a bank application. The founder signs in as the invited recipient and chooses or creates their organization.
-4. In sandbox, POST /sandbox/incorporations/&#123;referralId&#125;/simulate with a scenario: INVITED, CLAIMED, SUBMITTED, FILING, INCORPORATED or EIN_ISSUED. These scenarios send no founder email and create no real case, documents, payment, filing or bank account.
-5. GET /incorporations/&#123;referralId&#125; to read current status, or configure an endpoint to receive update notifications. Public documentation disables interactive requests; use your sandbox credentials from your own server or API client.
+<Steps titleSize="h2">
+<Step title="Get an access token">
 
-Example create body:
+Exchange your client credentials for a token. Keep the client secret on your server. Tokens last one hour; reuse a token until it expires.
 
-```json
-{
-	"externalReference": "partner-sandbox-formation-001",
-	"email": "founder@example.com",
-	"givenName": "Jane",
-	"familyName": "Doe",
-	"companyName": "Example Labs",
-	"lane": "US_DE_C_CORP"
-}
+<CodeGroup>
+
+```bash cURL
+curl https://api.expedite.now/api/partners/v1/token \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "grant_type": "client_credentials",
+    "client_id": "YOUR_CLIENT_ID",
+    "client_secret": "YOUR_CLIENT_SECRET"
+  }'
 ```
+
+```javascript JavaScript
+const api = "https://api.expedite.now/api/partners/v1"
+const tokenResponse = await fetch(`${api}/token`, {
+	method: "POST",
+	headers: { "Content-Type": "application/json" },
+	body: JSON.stringify({
+		grant_type: "client_credentials",
+		client_id: process.env.EXPEDITE_CLIENT_ID,
+		client_secret: process.env.EXPEDITE_CLIENT_SECRET,
+	}),
+})
+if (!tokenResponse.ok) throw new Error(`Token request failed: ${tokenResponse.status}`)
+const { access_token } = await tokenResponse.json()
+```
+
+```python Python
+import json
+import os
+from urllib.request import Request, urlopen
+
+api = "https://api.expedite.now/api/partners/v1"
+request = Request(f"{api}/token", data=json.dumps({
+    "grant_type": "client_credentials",
+    "client_id": os.environ["EXPEDITE_CLIENT_ID"],
+    "client_secret": os.environ["EXPEDITE_CLIENT_SECRET"],
+}).encode(), headers={"Content-Type": "application/json"})
+with urlopen(request) as response:
+    access_token = json.load(response)["access_token"]
+```
+
+</CodeGroup>
+
+For cURL, set `EXPEDITE_ACCESS_TOKEN` to the `access_token` returned above.
+
+</Step>
+
+<Step title="Invite a founder">
+
+Create a referral with your own stable customer reference. Use a unique `Idempotency-Key` for this invitation and reuse it if you retry the same request.
+
+<CodeGroup>
+
+```bash cURL
+curl https://api.expedite.now/api/partners/v1/incorporations \
+  --header "Authorization: Bearer $EXPEDITE_ACCESS_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --header 'Idempotency-Key: atlas-labs-incorporation-001' \
+  --data '{
+    "externalReference": "atlas-labs-001",
+    "email": "alex@example.com",
+    "givenName": "Alex",
+    "familyName": "Morgan",
+    "companyName": "Atlas Labs"
+  }'
+```
+
+```javascript JavaScript
+const createResponse = await fetch(`${api}/incorporations`, {
+	method: "POST",
+	headers: {
+		Authorization: `Bearer ${access_token}`,
+		"Content-Type": "application/json",
+		"Idempotency-Key": "atlas-labs-incorporation-001",
+	},
+	body: JSON.stringify({
+		externalReference: "atlas-labs-001",
+		email: "alex@example.com",
+		givenName: "Alex",
+		familyName: "Morgan",
+		companyName: "Atlas Labs",
+	}),
+})
+if (!createResponse.ok) throw new Error(`Invitation failed: ${createResponse.status}`)
+const referral = await createResponse.json()
+console.log(referral.id)
+```
+
+```python Python
+request = Request(f"{api}/incorporations", data=json.dumps({
+    "externalReference": "atlas-labs-001",
+    "email": "alex@example.com",
+    "givenName": "Alex",
+    "familyName": "Morgan",
+    "companyName": "Atlas Labs",
+}).encode(), headers={
+    "Authorization": f"Bearer {access_token}",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "atlas-labs-incorporation-001",
+})
+with urlopen(request) as response:
+    referral = json.load(response)
+print(referral["id"])
+```
+
+</CodeGroup>
+
+A `201 Created` response returns the referral. Save its `id` alongside your `externalReference`; for cURL, set `REFERRAL_ID` to this ID. In production, Expedite queues the invitation email. The founder follows the invitation, signs in, and completes their incorporation in Expedite. The API does not sign, charge, file, or open a bank account on their behalf.
+
+</Step>
+
+<Step title="Read the current progress">
+
+Fetch the referral using the ID from the create response. Before the founder accepts, `progress` is `null` and `invitation.status` tells you where the invitation stands.
+
+<CodeGroup>
+
+```bash cURL
+curl "https://api.expedite.now/api/partners/v1/incorporations/$REFERRAL_ID" \
+  --header "Authorization: Bearer $EXPEDITE_ACCESS_TOKEN"
+```
+
+```javascript JavaScript
+const statusResponse = await fetch(`${api}/incorporations/${referral.id}`, {
+	headers: { Authorization: `Bearer ${access_token}` },
+})
+if (!statusResponse.ok) throw new Error(`Progress request failed: ${statusResponse.status}`)
+const current = await statusResponse.json()
+console.log(current.invitation.status, current.progress)
+```
+
+```python Python
+request = Request(f"{api}/incorporations/{referral['id']}", headers={
+    "Authorization": f"Bearer {access_token}",
+})
+with urlopen(request) as response:
+    current = json.load(response)
+print(current["invitation"]["status"], current["progress"])
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Receive updates">
+
+[Register and verify a webhook endpoint](/guides/webhooks) to receive `incorporation.updated`. Each event identifies the referral and its version. Fetch the latest referral when an event arrives; [EIN issuance](/guides/ein-notifications) uses this same event.
+
+</Step>
+
+<Step title="Test the workflow">
+
+Expedite can issue sandbox credentials for development. The client determines the environment; adding a field to the request cannot switch it. With a sandbox referral, advance its state through `INVITED`, `CLAIMED`, `SUBMITTED`, `FILING`, `INCORPORATED`, or `EIN_ISSUED`.
+
+```bash cURL
+curl "https://api.expedite.now/api/partners/v1/sandbox/incorporations/$REFERRAL_ID/simulate" \
+  --header "Authorization: Bearer $EXPEDITE_ACCESS_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"scenario": "EIN_ISSUED"}'
+```
+
+Sandbox scenarios create no real case, founder email, document, charge, government filing, or bank account. Use them to test status handling; shared-document responses require a real authorized production referral.
+
+</Step>
+</Steps>

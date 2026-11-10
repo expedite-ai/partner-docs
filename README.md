@@ -43,7 +43,9 @@ The initial reviewed documentation snapshot can be published during setup;
 automatic updates start once the workflow is merged. Custom-domain DNS remains
 a separate account-owner action.
 
-The API playground uses simple mode: examples and schemas are visible, but the
-site does not submit partner credentials or invite founders. The static guides
-and API reference require no paid plan. Check Mintlify's current plan before
-enabling optional hosted features.
+The native API playground sends requests directly to Expedite (`proxy: false`).
+The partner HTTP handler supports CORS for its bearer-token API without cookie
+credentials. Use sandbox credentials when trying operations; production referral
+creation queues a real founder invitation. Deploy that handler before publishing
+the interactive reference. API examples are checked against the same executable
+contracts. Guide language tabs and steps use native Mintlify components.
