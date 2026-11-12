@@ -32,7 +32,8 @@ The canonical source stays here. `partner-docs-publish.yaml` publishes this
 committed directory from `main` to the public `expedite-ai/partner-docs` repository.
 Connect Mintlify only to that publishing repository, branch `main`, directory `/`.
 Do not edit the publishing copy or grant Mintlify private-monorepo access.
-After each publish the workflow waits up to ten minutes for Mintlify to deploy, then
+After each publish the workflow waits up to ten minutes for a Mintlify deployment newer
+than the last commit that changed a served file (Mintlify skips a `README.md`-only commit), then
 fails unless the live site serves this `openapi.json` and every navigation page with
 its title and description. Run the same check locally with
 `node .github/scripts/partner-docs-live-check.mjs verify --site https://expedition-ai-inc.mintlify.site/ --docs apps/partner-docs`.
