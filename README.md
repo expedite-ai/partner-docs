@@ -32,6 +32,11 @@ The canonical source stays here. `partner-docs-publish.yaml` publishes this
 committed directory from `main` to the public `expedite-ai/partner-docs` repository.
 Connect Mintlify only to that publishing repository, branch `main`, directory `/`.
 Do not edit the publishing copy or grant Mintlify private-monorepo access.
+After each publish the workflow waits up to ten minutes for Mintlify to deploy, then
+fails unless the live site serves this `openapi.json` and every navigation page with
+its title and description. Run the same check locally with
+`node .github/scripts/partner-docs-live-check.mjs verify --site https://expedition-ai-inc.mintlify.site/ --docs apps/partner-docs`.
+When the site moves to a custom domain, update `PARTNER_DOCS_SITE_URL` in the workflow.
 
 The monorepo Actions secret `PARTNER_DOCS_DEPLOY_KEY` holds an SSH deploy key with
 write access only to `expedite-ai/partner-docs`. Publication runs on relevant
@@ -39,9 +44,7 @@ write access only to `expedite-ai/partner-docs`. Publication runs on relevant
 rejects symlinks and hidden files and copies only the committed docs subtree; no
 application source, working-tree files or monorepo history is published. Verify
 that boundary locally with `node --test .github/scripts/partner-docs-export.test.mjs`.
-The initial reviewed documentation snapshot can be published during setup;
-automatic updates start once the workflow is merged. Custom-domain DNS remains
-a separate account-owner action.
+Custom-domain DNS remains a separate account-owner action.
 
 The native API playground sends requests directly to Expedite (`proxy: false`).
 The partner HTTP handler supports CORS for its bearer-token API without cookie
